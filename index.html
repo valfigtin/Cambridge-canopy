@@ -437,7 +437,9 @@ $('saveBtn').addEventListener('click', async ()=>{
   if (ok){
     applySeasonFilter();
     $('backdrop').classList.remove('open');
-    toast('🌳 ' + seasonLabel(seasonOf(new Date())) + ' photo added — thank you!');
+    toast(storageOk
+      ? '🌳 ' + seasonLabel(seasonOf(new Date())) + ' photo added — thank you!'
+      : '⚠ No connection — this photo will be lost when you close the app');
     if ($('keepCopy').checked){
       // Programmatic downloads fail silently on iPhones (esp. Home Screen apps),
       // so show the photo for a reliable press-and-hold save instead.
