@@ -275,24 +275,18 @@ function loadTrees(){
   $('totalCount').textContent = markers.length.toLocaleString();
 }
 
-// ================= Shared photo storage =================
-async function tryGet(key){
-  try{
-    const r = await window.storage.get(key, true);
-    return r && r.value ? r.value : null;
-  }catch(e){ return null; }
-}
+// ================= Shared photo storage (Supabase) =================
+const SB_URL = 'https://tsbtshhldidkvsfdzysv.supabase.co';
+const SB_KEY = 'sb_publishable_Wj1B3OQgQvEUynFMSGKJ8w_MktU4vOw'; // publishable key: safe to embed
+const SB_HEADERS = { apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY, 'Content-Type': 'application/json' };
+
 async function loadPhotoIndex(){
   try{
-    const idx = await tryGet('season-index');
-    seasonIndex = idx ? JSON.parse(idx) : {};
-  }catch(e){ seasonIndex = {}; }
-  try{
-    const listed = await window.storage.list('photo:', true);
-    for (const k of ((listed && listed.keys) || []))
-      photographedAll.add(k.slice('photo:'.length));
-    // Actively verify we can WRITE, not just read
-    await window.storage.set('ping', String(Date.now()), true);
+    // One lightweight query builds the whole map state (which trees have photos, per season)
+    const res = await fetch(SB_URL + '/rest/v1/photos?select=tree_id,season', { headers: SB_HEADERS });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const rows = await res.json();
+    for (const r of rows) bumpIndex(r.tree_id, r.season);
     storageOk = true;
   }catch(e){
     storageOk = false;
@@ -301,37 +295,44 @@ async function loadPhotoIndex(){
   pill.style.display = 'block';
   if (storageOk){
     pill.className = 'pill ok';
-    pill.textContent = '✓ Shared photos: connected';
+    pill.textContent = '\u2713 Shared photos: connected';
   } else {
     pill.className = 'pill bad';
-    pill.textContent = '⚠ Photos NOT saved — session only';
+    pill.textContent = '\u26a0 Photos NOT saved \u2014 no connection';
   }
 }
+
 async function getPhotos(id){
   if (!storageOk) return memoryPhotos[id] || [];
-  const v = await tryGet('photo:' + id);
-  return v ? JSON.parse(v) : (memoryPhotos[id] || []);
+  try{
+    const res = await fetch(SB_URL + '/rest/v1/photos?tree_id=eq.' + encodeURIComponent(id) +
+      '&select=img,season,created_at&order=created_at.asc', { headers: SB_HEADERS });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const rows = await res.json();
+    return rows.map(r => ({ img: r.img, season: r.season, date: r.created_at }));
+  }catch(e){ return memoryPhotos[id] || []; }
 }
+
 async function addPhoto(id, img){
-  const entry = { img, date: new Date().toISOString(), season: seasonOf(new Date()) };
+  const season = seasonOf(new Date());
   if (!storageOk){
-    (memoryPhotos[id] = memoryPhotos[id] || []).push(entry);
-    bumpIndex(id, entry.season);
+    (memoryPhotos[id] = memoryPhotos[id] || []).push({ img, season, date: new Date().toISOString() });
+    bumpIndex(id, season);
     return true;
   }
   try{
-    const existing = await getPhotos(id);
-    existing.push(entry);
-    await window.storage.set('photo:' + id, JSON.stringify(existing.slice(-6)), true);
-    // Read back to CONFIRM the photo really stored
-    const check = await tryGet('photo:' + id);
-    if (!check || !JSON.parse(check).some(p => p.date === entry.date))
-      throw new Error('verify failed');
-    bumpIndex(id, entry.season);
-    try{ await window.storage.set('season-index', JSON.stringify(seasonIndex), true); }catch(e){}
+    const res = await fetch(SB_URL + '/rest/v1/photos', {
+      method: 'POST',
+      headers: { ...SB_HEADERS, Prefer: 'return=representation' },
+      body: JSON.stringify({ tree_id: id, season: season, img: img })
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const rows = await res.json();          // returned row = save CONFIRMED by the database
+    if (!rows.length) throw new Error('no row returned');
+    bumpIndex(id, season);
     return true;
   }catch(e){
-    toast('⚠ Photo did NOT save to shared storage — please try again');
+    toast('\u26a0 Photo did NOT save \u2014 please try again');
     return false;
   }
 }
