@@ -280,16 +280,22 @@ const SB_URL = 'https://tsbtshhldidkvsfdzysv.supabase.co';
 const SB_KEY = 'sb_publishable_Wj1B3OQgQvEUynFMSGKJ8w_MktU4vOw'; // publishable key: safe to embed
 const SB_HEADERS = { apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY, 'Content-Type': 'application/json' };
 
+let lastStorageError = '';
 async function loadPhotoIndex(){
   try{
     // One lightweight query builds the whole map state (which trees have photos, per season)
     const res = await fetch(SB_URL + '/rest/v1/photos?select=tree_id,season', { headers: SB_HEADERS });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
+    if (!res.ok){
+      lastStorageError = 'HTTP ' + res.status + ': ' + (await res.text()).slice(0, 300);
+      throw new Error(lastStorageError);
+    }
     const rows = await res.json();
     for (const r of rows) bumpIndex(r.tree_id, r.season);
     storageOk = true;
+    lastStorageError = '';
   }catch(e){
     storageOk = false;
+    if (!lastStorageError) lastStorageError = String(e && e.message || e).slice(0, 300);
   }
   const pill = $('storagePill');
   pill.style.display = 'block';
@@ -298,9 +304,23 @@ async function loadPhotoIndex(){
     pill.textContent = '\u2713 Shared photos: connected';
   } else {
     pill.className = 'pill bad';
-    pill.textContent = '\u26a0 Photos NOT saved \u2014 no connection';
+    pill.textContent = '\u26a0 Photos NOT saved \u2014 tap for details';
   }
 }
+
+// Tap the pill any time to run a live connection test and see the raw result
+$('storagePill').addEventListener('click', async ()=>{
+  let report = 'CANOPY DIAGNOSTIC\\n\\nApp version: supabase-v2\\nDatabase: ' + SB_URL + '\\n\\n';
+  try{
+    const res = await fetch(SB_URL + '/rest/v1/photos?select=tree_id&limit=1', { headers: SB_HEADERS });
+    const body = (await res.text()).slice(0, 300);
+    report += 'READ test \u2192 HTTP ' + res.status + (res.ok ? ' (OK)' : '') + '\\n' + body + '\\n\\n';
+  }catch(e){
+    report += 'READ test \u2192 network error: ' + e.message + '\\n\\n';
+  }
+  if (lastStorageError) report += 'Last startup error:\\n' + lastStorageError;
+  alert(report);
+});
 
 async function getPhotos(id){
   if (!storageOk) return memoryPhotos[id] || [];
@@ -326,7 +346,10 @@ async function addPhoto(id, img){
       headers: { ...SB_HEADERS, Prefer: 'return=representation' },
       body: JSON.stringify({ tree_id: id, season: season, img: img })
     });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
+    if (!res.ok){
+      lastStorageError = 'SAVE failed \u2014 HTTP ' + res.status + ': ' + (await res.text()).slice(0, 300);
+      throw new Error(lastStorageError);
+    }
     const rows = await res.json();          // returned row = save CONFIRMED by the database
     if (!rows.length) throw new Error('no row returned');
     bumpIndex(id, season);
