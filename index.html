@@ -14,6 +14,7 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.min.css">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.Default.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/leaflet-rotate@0.2.7"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/leaflet.markercluster.min.js"></script>
 <style>
   :root{
@@ -62,6 +63,17 @@
     position:absolute;bottom:18px;right:12px;z-index:900;
     background:var(--paper);border:1px solid #D5DCCB;border-radius:999px;
     padding:5px 11px;font-size:10.5px;color:#6a745f;box-shadow:0 2px 8px rgba(0,0,0,.12);
+  }
+  .locate-btn{
+    position:absolute;bottom:52px;right:12px;z-index:900;
+    width:44px;height:44px;border-radius:50%;font-size:19px;
+    background:var(--paper);border:1px solid #D5DCCB;box-shadow:0 2px 8px rgba(0,0,0,.15);
+    display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0;
+  }
+  .locate-btn.active{background:var(--canopy);}
+  .user-dot{
+    width:16px;height:16px;border-radius:50%;
+    background:#2A6FDB;border:3px solid #fff;box-shadow:0 0 0 2px rgba(42,111,219,.35), 0 1px 4px rgba(0,0,0,.3);
   }
   .sheet-backdrop{
     position:fixed;inset:0;background:rgba(20,30,18,.45);z-index:2000;
@@ -175,6 +187,7 @@
   <div><span class="dot done"></span> <span id="legendDone">Photographed</span></div>
 </div>
 <div class="datastamp">City of Cambridge data · Aug 21, 2026</div>
+<button class="locate-btn" id="locateBtn" title="Find my location" aria-label="Find my location">📍</button>
 
 <div class="sheet-backdrop" id="backdrop">
   <div class="sheet" role="dialog" aria-label="Tree details">
@@ -219,7 +232,13 @@ const HOOD = [
 ];
 
 // ================= Map =================
-const map = L.map('map', { preferCanvas: true }).setView([42.3630, -71.1100], 15);
+const map = L.map('map', {
+  preferCanvas: true,
+  rotate: true,                 // leaflet-rotate plugin
+  touchRotate: true,            // two-finger twist on phones
+  rotateControl: { closeOnZeroBearing: false },
+  bearing: 0
+}).setView([42.3630, -71.1100], 15);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
   maxZoom: 19, attribution: '&copy; OpenStreetMap · Tree data: City of Cambridge'
 }).addTo(map);
@@ -299,16 +318,16 @@ async function loadPhotoIndex(){
   const pill = $('storagePill');
   if (storageOk){
     pill.className = 'sbar ok';
-    pill.textContent = '\u2713 Shared photos: connected \u00b7 app v3 \u00b7 tap to test';
+    pill.textContent = '\u2713 Shared photos: connected \u00b7 app v4 \u00b7 tap to test';
   } else {
     pill.className = 'sbar bad';
-    pill.textContent = '\u26a0 Photos NOT saving \u00b7 app v3 \u00b7 tap for details';
+    pill.textContent = '\u26a0 Photos NOT saving \u00b7 app v4 \u00b7 tap for details';
   }
 }
 
 // Tap the pill any time to run a live connection test and see the raw result
 $('storagePill').addEventListener('click', async ()=>{
-  let report = 'CANOPY DIAGNOSTIC\\n\\nApp version: v3 (supabase)\\nDatabase: ' + SB_URL + '\\n\\n';
+  let report = 'CANOPY DIAGNOSTIC\\n\\nApp version: v4 (rotate+locate)\\nDatabase: ' + SB_URL + '\\n\\n';
   try{
     const res = await fetch(SB_URL + '/rest/v1/photos?select=tree_id&limit=1', { headers: SB_HEADERS });
     const body = (await res.text()).slice(0, 300);
@@ -394,6 +413,38 @@ $('seasonBar').addEventListener('click', e => {
   activeSeason = btn.dataset.season;
   document.querySelectorAll('.chip').forEach(c => c.classList.toggle('active', c === btn));
   applySeasonFilter();
+});
+
+// ================= Geolocation =================
+let userMarker = null, userCircle = null;
+const userIcon = L.divIcon({ className:'', iconSize:[16,16], iconAnchor:[8,8],
+  html:'<div class="user-dot"></div>' });
+
+$('locateBtn').addEventListener('click', ()=>{
+  $('locateBtn').classList.add('active');
+  toast('Finding your location…');
+  map.locate({ setView: true, maxZoom: 18, enableHighAccuracy: true });
+});
+map.on('locationfound', e => {
+  $('locateBtn').classList.remove('active');
+  if (userMarker){ userMarker.setLatLng(e.latlng); userCircle.setLatLng(e.latlng).setRadius(e.accuracy); }
+  else {
+    userMarker = L.marker(e.latlng, { icon: userIcon, interactive: false }).addTo(map);
+    userCircle = L.circle(e.latlng, { radius: e.accuracy, color:'#2A6FDB', weight:1,
+      fillColor:'#2A6FDB', fillOpacity:.12, interactive:false }).addTo(map);
+  }
+  // Warn if the person is outside the app's neighborhoods
+  let inside = false;
+  for (let i=0, j=HOOD.length-1; i<HOOD.length; j=i++){
+    const [yi,xi] = HOOD[i], [yj,xj] = HOOD[j];
+    if (((yi>e.latlng.lat)!==(yj>e.latlng.lat)) &&
+        (e.latlng.lng < (xj-xi)*(e.latlng.lat-yi)/(yj-yi)+xi)) inside = !inside;
+  }
+  toast(inside ? '📍 You are here' : '📍 You are outside the Cambridgeport/Riverside area');
+});
+map.on('locationerror', e => {
+  $('locateBtn').classList.remove('active');
+  toast('⚠ Location unavailable — check location permission for this site');
 });
 
 // ================= Tree sheet =================
