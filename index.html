@@ -117,11 +117,18 @@
     width:100%;padding:10px 12px;border:1.5px solid #C9D2BE;border-radius:10px;
     font-size:14px;font-family:inherit;background:#fff;color:var(--ink);resize:none;height:64px;margin-bottom:8px;
   }
-  #commentName{
+  #userName{
     width:100%;padding:9px 12px;border:1.5px solid #C9D2BE;border-radius:10px;
-    font-size:13.5px;font-family:inherit;background:#fff;color:var(--ink);margin-bottom:8px;
+    font-size:13.5px;font-family:inherit;background:#fff;color:var(--ink);margin-bottom:12px;
   }
-  #commentBody:focus,#commentName:focus{outline:2px solid var(--leaf);outline-offset:1px;}
+  #commentBody:focus,#userName:focus{outline:2px solid var(--leaf);outline-offset:1px;}
+  .ph .cap{font-size:10.5px;color:#6a745f;margin-top:3px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .ph .cap .flagged{color:#A4442A;font-weight:700;}
+  .ph .flagbtn{
+    position:absolute;top:6px;left:6px;width:26px;height:26px;border-radius:50%;
+    background:rgba(20,30,18,.55);border:none;color:#fff;font-size:12px;
+    display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0;
+  }
   .btn-note{
     background:var(--bud);color:#2F6B3C;border:1.5px solid #B8D4A8;width:100%;
     padding:10px;font-size:14px;margin-bottom:16px;
@@ -213,11 +220,11 @@
     <h2 id="treeName">Tree</h2>
     <div class="sci" id="treeSci"></div>
     <div class="meta" id="treeMeta"></div>
+    <input type="text" id="userName" maxlength="40" placeholder="Your name (required to add photos or notes)">
     <div class="gallery" id="gallery"></div>
     <div class="c-head">Stories &amp; notes</div>
     <div class="comments" id="comments"></div>
     <textarea id="commentBody" maxlength="1000" placeholder="Share a story or note about this tree…"></textarea>
-    <input type="text" id="commentName" maxlength="40" placeholder="Your name (optional)">
     <button class="btn-note" id="commentBtn">Add note</button>
     <div class="photo-zone" id="photoZone">
       <span class="cam">📷</span>Take a photo or choose one from your library
@@ -228,7 +235,7 @@
       <button class="btn-ghost" id="closeBtn">Close</button>
       <button class="btn-primary" id="saveBtn" disabled>Add my photo</button>
     </div>
-    <div class="note">Photos are shared — everyone using this map can see them. Tree locations &amp; species: City of Cambridge Street Trees dataset (exported Aug 21, 2026).</div>
+    <div class="note">Photos and notes are shared with your name — everyone using this map can see them. Tree locations &amp; species: City of Cambridge Street Trees dataset (exported Aug 21, 2026).</div>
   </div>
 </div>
 
@@ -354,16 +361,16 @@ async function loadPhotoIndex(){
   const pill = $('storagePill');
   if (storageOk){
     pill.className = 'sbar ok';
-    pill.textContent = '\u2713 Shared photos: connected \u00b7 app v6 \u00b7 tap to test';
+    pill.textContent = '\u2713 Shared photos: connected \u00b7 app v7 \u00b7 tap to test';
   } else {
     pill.className = 'sbar bad';
-    pill.textContent = '\u26a0 Photos NOT saving \u00b7 app v6 \u00b7 tap for details';
+    pill.textContent = '\u26a0 Photos NOT saving \u00b7 app v7 \u00b7 tap for details';
   }
 }
 
 // Tap the pill any time to run a live connection test and see the raw result
 $('storagePill').addEventListener('click', async ()=>{
-  let report = 'CANOPY DIAGNOSTIC\\n\\nApp version: v6 (riverfront)\\nDatabase: ' + SB_URL + '\\n\\n';
+  let report = 'CANOPY DIAGNOSTIC\\n\\nApp version: v7 (names+flags)\\nDatabase: ' + SB_URL + '\\n\\n';
   try{
     const res = await fetch(SB_URL + '/rest/v1/photos?select=tree_id&limit=1', { headers: SB_HEADERS });
     const body = (await res.text()).slice(0, 300);
@@ -379,11 +386,21 @@ async function getPhotos(id){
   if (!storageOk) return memoryPhotos[id] || [];
   try{
     const res = await fetch(SB_URL + '/rest/v1/photos?tree_id=eq.' + encodeURIComponent(id) +
-      '&select=img,season,created_at&order=created_at.asc', { headers: SB_HEADERS });
+      '&select=id,img,season,created_at,username&order=created_at.asc', { headers: SB_HEADERS });
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const rows = await res.json();
-    return rows.map(r => ({ img: r.img, season: r.season, date: r.created_at }));
+    return rows.map(r => ({ pid: r.id, img: r.img, season: r.season, date: r.created_at, username: r.username }));
   }catch(e){ return memoryPhotos[id] || []; }
+}
+
+// Username: required for uploads, remembered on this device
+function currentUsername(){ return ($('userName').value || '').trim(); }
+function initUsername(){
+  try{ $('userName').value = localStorage.getItem('canopy-username') || ''; }catch(e){}
+  $('userName').addEventListener('input', ()=>{
+    try{ localStorage.setItem('canopy-username', currentUsername()); }catch(e){}
+    $('saveBtn').disabled = !(pendingPhoto && currentUsername());
+  });
 }
 
 async function addPhoto(id, img){
@@ -397,7 +414,7 @@ async function addPhoto(id, img){
     const res = await fetch(SB_URL + '/rest/v1/photos', {
       method: 'POST',
       headers: { ...SB_HEADERS, Prefer: 'return=representation' },
-      body: JSON.stringify({ tree_id: id, season: season, img: img })
+      body: JSON.stringify({ tree_id: id, season: season, img: img, username: currentUsername() || null })
     });
     if (!res.ok){
       lastStorageError = 'SAVE failed \u2014 HTTP ' + res.status + ': ' + (await res.text()).slice(0, 300);
@@ -511,6 +528,7 @@ async function loadComments(id){
 $('commentBtn').addEventListener('click', async ()=>{
   const body = $('commentBody').value.trim();
   if (!currentTree || !body) return;
+  if (!currentUsername()){ toast('Please enter your name first'); $('userName').focus(); return; }
   const btn = $('commentBtn');
   btn.disabled = true; btn.textContent = 'Adding…';
   try{
@@ -519,7 +537,7 @@ $('commentBtn').addEventListener('click', async ()=>{
       headers: { ...SB_HEADERS, Prefer: 'return=representation' },
       body: JSON.stringify({
         tree_id: currentTree.id,
-        author: $('commentName').value.trim() || null,
+        author: currentUsername(),
         body: body
       })
     });
@@ -550,6 +568,13 @@ async function openTree(t){
   loadComments(t.id);
 
   const photos = await getPhotos(t.id);
+  // Which photos have been flagged as incorrect?
+  let flagged = new Set();
+  try{
+    const fres = await fetch(SB_URL + '/rest/v1/flags?tree_id=eq.' + encodeURIComponent(t.id) +
+      '&select=photo_id', { headers: SB_HEADERS });
+    if (fres.ok) (await fres.json()).forEach(f => flagged.add(f.photo_id));
+  }catch(e){}
   const shown = activeSeason === 'all' ? photos
     : photos.filter(p => (p.season || seasonOf(p.date)) === activeSeason);
   const g = $('gallery');
@@ -564,9 +589,13 @@ async function openTree(t){
       const wrap = document.createElement('div');
       wrap.className = 'ph';
       const fname = (t.common + '_' + s + '_' + (p.date||'').slice(0,10)).replace(/[^\w-]+/g,'-') + '.jpg';
-      wrap.innerHTML = '<img src="'+p.img+'" alt="Tree photo">' +
+      const isFlagged = p.pid && flagged.has(p.pid);
+      wrap.innerHTML = '<img src="'+p.img+'" alt="Tree photo"' + (isFlagged ? ' style="outline:3px solid #A4442A"' : '') + '>' +
         '<span class="badge '+s+'">'+seasonLabel(s)+'</span>' +
-        '<a class="dl" href="'+p.img+'" download="'+fname+'" title="Save to your device">⬇</a>';
+        (p.pid ? '<button class="flagbtn" data-pid="'+p.pid+'" title="Flag this photo as incorrect">🚩</button>' : '') +
+        '<a class="dl" href="'+p.img+'" download="'+fname+'" title="Save to your device">⬇</a>' +
+        '<div class="cap">by ' + esc(p.username || 'a neighbor') +
+        (isFlagged ? ' · <span class="flagged">⚠ flagged</span>' : '') + '</div>';
       g.appendChild(wrap);
     }
   }
@@ -584,10 +613,39 @@ $('photoInput').addEventListener('change', ()=>{
     c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
     pendingPhoto = c.toDataURL('image/jpeg', 0.65);
     $('photoZone').innerHTML = '<img src="'+pendingPhoto+'" alt="Your photo">';
-    $('saveBtn').disabled = false;
+    $('saveBtn').disabled = !currentUsername();
+    if (!currentUsername()) toast('Enter your name to add this photo');
     URL.revokeObjectURL(img.src);
   };
   img.src = URL.createObjectURL(f);
+});
+
+// Flag a photo as incorrect (wrong tree, wrong species, not a tree photo…)
+$('gallery').addEventListener('click', async e => {
+  const btn = e.target.closest('.flagbtn');
+  if (!btn || !currentTree) return;
+  if (!currentUsername()){ toast('Please enter your name first'); $('userName').focus(); return; }
+  const reason = prompt('Why is this photo incorrect? (optional)') ;
+  if (reason === null) return; // cancelled
+  btn.disabled = true;
+  try{
+    const res = await fetch(SB_URL + '/rest/v1/flags', {
+      method: 'POST',
+      headers: { ...SB_HEADERS, Prefer: 'return=representation' },
+      body: JSON.stringify({
+        photo_id: +btn.dataset.pid,
+        tree_id: currentTree.id,
+        reason: (reason || '').trim() || null,
+        username: currentUsername()
+      })
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    toast('🚩 Flagged — the map keeper will review it');
+    openTree(currentTree); // refresh to show the flag
+  }catch(err){
+    toast('⚠ Flag did NOT save — please try again');
+    btn.disabled = false;
+  }
 });
 
 $('saveBtn').addEventListener('click', async ()=>{
@@ -615,6 +673,7 @@ $('saveModalDone').addEventListener('click', ()=> $('saveModal').classList.remov
 $('backdrop').addEventListener('click', e => { if (e.target === $('backdrop')) $('backdrop').classList.remove('open'); });
 
 // ================= Boot =================
+initUsername();
 loadTrees();
 loadPhotoIndex().then(applySeasonFilter);
 </script>
