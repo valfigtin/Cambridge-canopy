@@ -108,6 +108,25 @@
     height:120px;flex:1;border:2px dashed #B8C4AA;border-radius:10px;background:var(--bud);
     display:flex;align-items:center;justify-content:center;color:#4a5942;font-size:13px;text-align:center;padding:0 14px;
   }
+  .c-head{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:#556050;margin:2px 0 8px;}
+  .comments{margin-bottom:10px;}
+  .cmt{background:var(--bud);border-radius:10px;padding:9px 12px;margin-bottom:8px;font-size:13.5px;line-height:1.45;}
+  .cmt .who{font-size:11px;color:#6a745f;margin-top:4px;}
+  .comments .none{font-size:12.5px;color:#78826d;font-style:italic;margin-bottom:4px;}
+  #commentBody{
+    width:100%;padding:10px 12px;border:1.5px solid #C9D2BE;border-radius:10px;
+    font-size:14px;font-family:inherit;background:#fff;color:var(--ink);resize:none;height:64px;margin-bottom:8px;
+  }
+  #commentName{
+    width:100%;padding:9px 12px;border:1.5px solid #C9D2BE;border-radius:10px;
+    font-size:13.5px;font-family:inherit;background:#fff;color:var(--ink);margin-bottom:8px;
+  }
+  #commentBody:focus,#commentName:focus{outline:2px solid var(--leaf);outline-offset:1px;}
+  .btn-note{
+    background:var(--bud);color:#2F6B3C;border:1.5px solid #B8D4A8;width:100%;
+    padding:10px;font-size:14px;margin-bottom:16px;
+  }
+  .btn-note:disabled{opacity:.55;cursor:default;}
   .photo-zone{
     border:2px dashed #B8C4AA;border-radius:12px;background:var(--bud);
     padding:14px;text-align:center;cursor:pointer;font-size:14px;color:#4a5942;margin-bottom:12px;
@@ -195,6 +214,11 @@
     <div class="sci" id="treeSci"></div>
     <div class="meta" id="treeMeta"></div>
     <div class="gallery" id="gallery"></div>
+    <div class="c-head">Stories &amp; notes</div>
+    <div class="comments" id="comments"></div>
+    <textarea id="commentBody" maxlength="1000" placeholder="Share a story or note about this tree…"></textarea>
+    <input type="text" id="commentName" maxlength="40" placeholder="Your name (optional)">
+    <button class="btn-note" id="commentBtn">Add note</button>
     <div class="photo-zone" id="photoZone">
       <span class="cam">📷</span>Take a photo or choose one from your library
     </div>
@@ -318,16 +342,16 @@ async function loadPhotoIndex(){
   const pill = $('storagePill');
   if (storageOk){
     pill.className = 'sbar ok';
-    pill.textContent = '\u2713 Shared photos: connected \u00b7 app v4 \u00b7 tap to test';
+    pill.textContent = '\u2713 Shared photos: connected \u00b7 app v5 \u00b7 tap to test';
   } else {
     pill.className = 'sbar bad';
-    pill.textContent = '\u26a0 Photos NOT saving \u00b7 app v4 \u00b7 tap for details';
+    pill.textContent = '\u26a0 Photos NOT saving \u00b7 app v5 \u00b7 tap for details';
   }
 }
 
 // Tap the pill any time to run a live connection test and see the raw result
 $('storagePill').addEventListener('click', async ()=>{
-  let report = 'CANOPY DIAGNOSTIC\\n\\nApp version: v4 (rotate+locate)\\nDatabase: ' + SB_URL + '\\n\\n';
+  let report = 'CANOPY DIAGNOSTIC\\n\\nApp version: v5 (stories)\\nDatabase: ' + SB_URL + '\\n\\n';
   try{
     const res = await fetch(SB_URL + '/rest/v1/photos?select=tree_id&limit=1', { headers: SB_HEADERS });
     const body = (await res.text()).slice(0, 300);
@@ -447,6 +471,58 @@ map.on('locationerror', e => {
   toast('⚠ Location unavailable — check location permission for this site');
 });
 
+// ================= Stories & notes =================
+function esc(s){ const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+
+async function loadComments(id){
+  const box = $('comments');
+  box.innerHTML = '<div class="none">Loading notes…</div>';
+  try{
+    const res = await fetch(SB_URL + '/rest/v1/comments?tree_id=eq.' + encodeURIComponent(id) +
+      '&select=author,body,created_at&order=created_at.asc', { headers: SB_HEADERS });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const rows = await res.json();
+    if (!rows.length){
+      box.innerHTML = '<div class="none">No stories yet — do you know this tree?</div>';
+      return;
+    }
+    box.innerHTML = rows.map(r =>
+      '<div class="cmt">' + esc(r.body) +
+      '<div class="who">— ' + esc(r.author || 'A neighbor') + ' · ' +
+      new Date(r.created_at).toLocaleDateString() + '</div></div>'
+    ).join('');
+  }catch(e){
+    box.innerHTML = '<div class="none">Notes unavailable right now.</div>';
+  }
+}
+
+$('commentBtn').addEventListener('click', async ()=>{
+  const body = $('commentBody').value.trim();
+  if (!currentTree || !body) return;
+  const btn = $('commentBtn');
+  btn.disabled = true; btn.textContent = 'Adding…';
+  try{
+    const res = await fetch(SB_URL + '/rest/v1/comments', {
+      method: 'POST',
+      headers: { ...SB_HEADERS, Prefer: 'return=representation' },
+      body: JSON.stringify({
+        tree_id: currentTree.id,
+        author: $('commentName').value.trim() || null,
+        body: body
+      })
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const rows = await res.json();
+    if (!rows.length) throw new Error('no row returned');
+    $('commentBody').value = '';
+    await loadComments(currentTree.id);
+    toast('🌳 Note added — thank you!');
+  }catch(e){
+    toast('⚠ Note did NOT save — please try again');
+  }
+  btn.disabled = false; btn.textContent = 'Add note';
+});
+
 // ================= Tree sheet =================
 async function openTree(t){
   currentTree = t; pendingPhoto = null;
@@ -459,6 +535,7 @@ async function openTree(t){
   $('saveBtn').disabled = true;
   $('gallery').innerHTML = '<div class="empty">Loading photos…</div>';
   $('backdrop').classList.add('open');
+  loadComments(t.id);
 
   const photos = await getPhotos(t.id);
   const shown = activeSeason === 'all' ? photos
