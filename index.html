@@ -162,6 +162,39 @@
     pointer-events:none;white-space:nowrap;
   }
   .toast.show{opacity:1;}
+  .lb-btn{
+    margin-left:auto;width:36px;height:36px;border-radius:50%;flex:none;
+    background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.25);
+    font-size:17px;display:flex;align-items:center;justify-content:center;padding:0;cursor:pointer;
+  }
+  .progress-labels{cursor:pointer;}
+  .lb{position:fixed;inset:0;background:var(--paper);z-index:2500;display:none;flex-direction:column;overflow-y:auto;}
+  .lb.open{display:flex;}
+  .lb-head{background:var(--ink);color:var(--paper);padding:12px 16px;display:flex;align-items:center;gap:10px;position:sticky;top:0;}
+  .lb-head span{font-family:Georgia,serif;font-size:17px;font-weight:600;}
+  .lb-back{background:none;border:none;color:var(--paper);font-size:22px;padding:0 4px 0 0;cursor:pointer;line-height:1;}
+  .lb-tabs{display:flex;gap:6px;padding:12px 16px 4px;}
+  .lb-tab{flex:1;border:1.5px solid #C9D2BE;background:transparent;color:#556050;border-radius:999px;padding:7px 0;font-size:12.5px;font-weight:600;}
+  .lb-tab.active{background:var(--ink);color:var(--paper);border-color:var(--ink);}
+  .lb-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;padding:10px 16px 6px;}
+  .lb-stat{background:var(--bud);border-radius:10px;padding:10px 6px;text-align:center;}
+  .lb-stat b{display:block;font-family:Georgia,serif;font-size:20px;color:#2F6B3C;}
+  .lb-stat span{font-size:11.5px;color:#556050;}
+  .lb-list{padding:4px 16px;}
+  .lb-row{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid #E3E8DA;}
+  .lb-rank{width:24px;font-size:14px;font-weight:700;color:#8a9480;text-align:center;}
+  .lb-rank.top{color:#BA7517;}
+  .lb-av{width:34px;height:34px;border-radius:50%;background:var(--bud);color:#27500A;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;flex:none;}
+  .lb-name{font-size:14px;font-weight:600;}
+  .lb-sub{font-size:12px;color:#6a745f;}
+  .lb-empty{padding:24px 16px;text-align:center;color:#78826d;font-size:13.5px;}
+  .lb-you{margin:12px 16px 28px;border:2px solid var(--leaf);border-radius:12px;padding:12px;}
+  .lb-you .row{display:flex;justify-content:space-between;align-items:baseline;}
+  .lb-pills{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap;}
+  .lb-pill{font-size:12px;padding:3px 9px;border-radius:999px;color:#fff;}
+  .lb-pill.spring{background:var(--spring);} .lb-pill.summer{background:var(--summer);}
+  .lb-pill.fall{background:var(--fall);} .lb-pill.winter{background:var(--winter);}
+  .lb-pill.zero{background:#E3E8DA;color:#8a9480;}
   .sbar{
     display:none;padding:7px 14px;text-align:center;
     font-size:12px;font-weight:700;cursor:pointer;
@@ -188,6 +221,7 @@
       <h1>Cambridge Canopy</h1>
       <div class="sub">Cambridgeport · Riverside · Harvard Sq · Kendall Sq</div>
     </div>
+    <button class="lb-btn" id="lbBtn" aria-label="Contributors" title="Contributors">🏆</button>
   </div>
   <div class="progress-wrap">
     <div class="progress-labels">
@@ -237,6 +271,21 @@
     </div>
     <div class="note">Photos and notes are shared with your name — everyone using this map can see them. Tree locations &amp; species: City of Cambridge Street Trees dataset (exported Aug 21, 2026).</div>
   </div>
+</div>
+
+<div class="lb" id="lb">
+  <div class="lb-head">
+    <button class="lb-back" id="lbClose" aria-label="Back to map">‹</button>
+    <span>Contributors</span>
+  </div>
+  <div class="lb-tabs" id="lbTabs">
+    <button class="lb-tab active" data-win="all">All time</button>
+    <button class="lb-tab" data-win="month">This month</button>
+    <button class="lb-tab" data-win="season" id="lbSeasonTab">Season</button>
+  </div>
+  <div class="lb-stats" id="lbStats"></div>
+  <div class="lb-list" id="lbList"><div class="lb-empty">Loading…</div></div>
+  <div class="lb-you" id="lbYou" style="display:none"></div>
 </div>
 
 <div class="toast" id="toast"></div>
@@ -344,15 +393,28 @@ const SB_KEY = 'sb_publishable_Wj1B3OQgQvEUynFMSGKJ8w_MktU4vOw'; // publishable 
 const SB_HEADERS = { apikey: SB_KEY, Authorization: 'Bearer ' + SB_KEY, 'Content-Type': 'application/json' };
 
 let lastStorageError = '';
-async function loadPhotoIndex(){
-  try{
-    // One lightweight query builds the whole map state (which trees have photos, per season)
-    const res = await fetch(SB_URL + '/rest/v1/photos?select=tree_id,season', { headers: SB_HEADERS });
+// Fetch every row of a query, paging past the database's 1,000-row limit
+async function fetchAll(query){
+  const out = [], PAGE = 1000; let from = 0;
+  while (true){
+    const res = await fetch(SB_URL + '/rest/v1/' + query,
+      { headers: { ...SB_HEADERS, Range: from + '-' + (from + PAGE - 1) } });
     if (!res.ok){
       lastStorageError = 'HTTP ' + res.status + ': ' + (await res.text()).slice(0, 300);
       throw new Error(lastStorageError);
     }
     const rows = await res.json();
+    out.push(...rows);
+    if (rows.length < PAGE) break;
+    from += PAGE;
+  }
+  return out;
+}
+
+async function loadPhotoIndex(){
+  try{
+    // One lightweight query builds the whole map state (which trees have photos, per season)
+    const rows = await fetchAll('photos?select=tree_id,season&order=created_at.asc');
     for (const r of rows) bumpIndex(r.tree_id, r.season);
     storageOk = true;
     lastStorageError = '';
@@ -363,16 +425,16 @@ async function loadPhotoIndex(){
   const pill = $('storagePill');
   if (storageOk){
     pill.className = 'sbar ok';
-    pill.textContent = '\u2713 Shared photos: connected \u00b7 app v9 \u00b7 tap to test';
+    pill.textContent = '\u2713 Shared photos: connected \u00b7 app v10 \u00b7 tap to test';
   } else {
     pill.className = 'sbar bad';
-    pill.textContent = '\u26a0 Photos NOT saving \u00b7 app v9 \u00b7 tap for details';
+    pill.textContent = '\u26a0 Photos NOT saving \u00b7 app v10 \u00b7 tap for details';
   }
 }
 
 // Tap the pill any time to run a live connection test and see the raw result
 $('storagePill').addEventListener('click', async ()=>{
-  let report = 'CANOPY DIAGNOSTIC\\n\\nApp version: v9 (auto-update)\\nDatabase: ' + SB_URL + '\\n\\n';
+  let report = 'CANOPY DIAGNOSTIC\\n\\nApp version: v10 (leaderboard)\\nDatabase: ' + SB_URL + '\\n\\n';
   try{
     const res = await fetch(SB_URL + '/rest/v1/photos?select=tree_id&limit=1', { headers: SB_HEADERS });
     const body = (await res.text()).slice(0, 300);
@@ -668,6 +730,113 @@ $('saveBtn').addEventListener('click', async ()=>{
 $('closeBtn').addEventListener('click', ()=> $('backdrop').classList.remove('open'));
 $('saveModalDone').addEventListener('click', ()=> $('saveModal').classList.remove('open'));
 $('backdrop').addEventListener('click', e => { if (e.target === $('backdrop')) $('backdrop').classList.remove('open'); });
+
+// ================= Contributors / leaderboard =================
+let lbData = null, lbWin = 'all';
+function lbSeason(){ return activeSeason !== 'all' ? activeSeason : seasonOf(new Date()); }
+function initials(n){ return n.trim().split(/\s+/).slice(0,2).map(w => w[0].toUpperCase()).join(''); }
+function inWin(dateStr, season){
+  if (lbWin === 'all') return true;
+  const d = new Date(dateStr), now = new Date();
+  if (lbWin === 'month') return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
+  return (season || seasonOf(d)) === lbSeason();
+}
+
+async function openLeaderboard(){
+  $('lbSeasonTab').textContent = seasonLabel(lbSeason());
+  $('lb').classList.add('open');
+  if (!lbData){
+    $('lbList').innerHTML = '<div class="lb-empty">Loading…</div>';
+    try{
+      const [photos, comments, flags] = await Promise.all([
+        fetchAll('photos?select=id,username,tree_id,season,created_at&order=created_at.asc'),
+        fetchAll('comments?select=author,tree_id,created_at').catch(()=>[]),
+        fetchAll('flags?select=photo_id').catch(()=>[])
+      ]);
+      const flagged = new Set(flags.map(f => f.photo_id));
+      lbData = { photos: photos.filter(p => !flagged.has(p.id)), comments };
+    }catch(e){
+      $('lbList').innerHTML = '<div class="lb-empty">Could not load contributor data right now.</div>';
+      return;
+    }
+  }
+  renderLeaderboard();
+}
+
+function renderLeaderboard(){
+  const photos = lbData.photos.filter(p => inWin(p.created_at, p.season));
+  const comments = lbData.comments.filter(c => inWin(c.created_at, null));
+  const users = {};
+  const get = n => users[n] || (users[n] = { photos:0, trees:new Set(), seasons:new Set(), stories:0 });
+  for (const p of photos){
+    if (!p.username) continue;
+    const u = get(p.username);
+    u.photos++; u.trees.add(p.tree_id); u.seasons.add(p.season || seasonOf(p.created_at));
+  }
+  for (const c of comments){ if (c.author) get(c.author).stories++; }
+
+  const doneTrees = new Set(photos.map(p => p.tree_id).filter(id => trees[id])).size;
+  const total = Object.keys(trees).length;
+  $('lbStats').innerHTML =
+    '<div class="lb-stat"><b>' + Object.keys(users).length + '</b><span>contributors</span></div>' +
+    '<div class="lb-stat"><b>' + photos.length.toLocaleString() + '</b><span>photos</span></div>' +
+    '<div class="lb-stat"><b>' + (total ? (100*doneTrees/total).toFixed(1) : 0) + '%</b><span>of trees done</span></div>';
+
+  const ranked = Object.entries(users)
+    .map(([name, u]) => ({ name, photos:u.photos, trees:u.trees.size, seasons:u.seasons.size, stories:u.stories }))
+    .sort((a,b) => b.trees - a.trees || b.photos - a.photos || b.stories - a.stories);
+
+  if (!ranked.length){
+    $('lbList').innerHTML = '<div class="lb-empty">No named contributions ' +
+      (lbWin === 'all' ? 'yet' : 'in this period') + ' — add your name in any tree\'s panel and be the first.</div>';
+  } else {
+    $('lbList').innerHTML = ranked.slice(0, 30).map((u, i) =>
+      '<div class="lb-row"><div class="lb-rank' + (i < 3 ? ' top' : '') + '">' + (i+1) + '</div>' +
+      '<div class="lb-av">' + esc(initials(u.name)) + '</div>' +
+      '<div style="flex:1;min-width:0"><div class="lb-name">' + esc(u.name) + '</div>' +
+      '<div class="lb-sub">' + u.photos + ' photo' + (u.photos===1?'':'s') + ' · ' + u.trees + ' tree' + (u.trees===1?'':'s') +
+      (u.seasons ? ' · ' + u.seasons + ' season' + (u.seasons===1?'':'s') : '') +
+      (u.stories ? ' · ' + u.stories + ' stor' + (u.stories===1?'y':'ies') : '') + '</div></div>' +
+      (i === 0 ? '<span title="Top contributor">🏆</span>' : '') + '</div>'
+    ).join('');
+  }
+
+  // Your card (all-time per-season breakdown)
+  const me = currentUsername();
+  const you = $('lbYou');
+  if (!me){
+    you.style.display = 'block';
+    you.innerHTML = '<div class="lb-name">You</div><div class="lb-sub">Add your name in any tree\'s panel and your contributions will appear here.</div>';
+    return;
+  }
+  const rank = ranked.findIndex(u => u.name === me);
+  const mine = lbData.photos.filter(p => p.username === me);
+  const bySeason = { spring:0, summer:0, fall:0, winter:0 };
+  mine.forEach(p => { bySeason[p.season || seasonOf(p.created_at)]++; });
+  const myTrees = new Set(mine.map(p => p.tree_id)).size;
+  const myStories = lbData.comments.filter(c => c.author === me).length;
+  you.style.display = 'block';
+  you.innerHTML =
+    '<div class="row"><div class="lb-name">You (' + esc(me) + ')</div>' +
+    '<div class="lb-sub">' + (rank >= 0 ? 'rank ' + (rank+1) + ' of ' + ranked.length : 'not ranked ' + (lbWin==='all'?'yet':'this period')) + '</div></div>' +
+    '<div class="lb-sub">' + mine.length + ' photo' + (mine.length===1?'':'s') + ' · ' + myTrees + ' tree' + (myTrees===1?'':'s') +
+    ' · ' + myStories + ' stor' + (myStories===1?'y':'ies') + ' all time</div>' +
+    '<div class="lb-pills">' + ['spring','summer','fall','winter'].map(s =>
+      '<span class="lb-pill ' + (bySeason[s] ? s : 'zero') + '">' + seasonLabel(s) + ' ' + bySeason[s] + '</span>').join('') + '</div>';
+}
+
+$('lbBtn').addEventListener('click', openLeaderboard);
+$('progressLabel').parentElement.addEventListener('click', openLeaderboard);
+$('lbClose').addEventListener('click', ()=> $('lb').classList.remove('open'));
+$('lbTabs').addEventListener('click', e => {
+  const b = e.target.closest('.lb-tab'); if (!b) return;
+  lbWin = b.dataset.win;
+  document.querySelectorAll('.lb-tab').forEach(t => t.classList.toggle('active', t === b));
+  if (lbData) renderLeaderboard();
+});
+// New uploads should show up next time the board opens
+const _origAddPhoto = addPhoto;
+addPhoto = async function(id, img){ const ok = await _origAddPhoto(id, img); if (ok) lbData = null; return ok; };
 
 // ================= Auto-update check =================
 // Ask GitHub (bypassing any cache) for the fingerprint of the current file.
