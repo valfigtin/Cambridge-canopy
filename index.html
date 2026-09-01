@@ -363,16 +363,16 @@ async function loadPhotoIndex(){
   const pill = $('storagePill');
   if (storageOk){
     pill.className = 'sbar ok';
-    pill.textContent = '\u2713 Shared photos: connected \u00b7 app v8 \u00b7 tap to test';
+    pill.textContent = '\u2713 Shared photos: connected \u00b7 app v9 \u00b7 tap to test';
   } else {
     pill.className = 'sbar bad';
-    pill.textContent = '\u26a0 Photos NOT saving \u00b7 app v8 \u00b7 tap for details';
+    pill.textContent = '\u26a0 Photos NOT saving \u00b7 app v9 \u00b7 tap for details';
   }
 }
 
 // Tap the pill any time to run a live connection test and see the raw result
 $('storagePill').addEventListener('click', async ()=>{
-  let report = 'CANOPY DIAGNOSTIC\\n\\nApp version: v8 (squares+zoom)\\nDatabase: ' + SB_URL + '\\n\\n';
+  let report = 'CANOPY DIAGNOSTIC\\n\\nApp version: v9 (auto-update)\\nDatabase: ' + SB_URL + '\\n\\n';
   try{
     const res = await fetch(SB_URL + '/rest/v1/photos?select=tree_id&limit=1', { headers: SB_HEADERS });
     const body = (await res.text()).slice(0, 300);
@@ -668,6 +668,27 @@ $('saveBtn').addEventListener('click', async ()=>{
 $('closeBtn').addEventListener('click', ()=> $('backdrop').classList.remove('open'));
 $('saveModalDone').addEventListener('click', ()=> $('saveModal').classList.remove('open'));
 $('backdrop').addEventListener('click', e => { if (e.target === $('backdrop')) $('backdrop').classList.remove('open'); });
+
+// ================= Auto-update check =================
+// Ask GitHub (bypassing any cache) for the fingerprint of the current file.
+// If it differs from what this copy was loaded with, reload from a fresh address.
+(async function checkForUpdate(){
+  try{
+    const res = await fetch(location.pathname, { method: 'HEAD', cache: 'no-store' });
+    const tag = res.headers.get('etag') || res.headers.get('last-modified');
+    if (!tag) return;
+    const stored = localStorage.getItem('canopy-etag');
+    const justReloaded = sessionStorage.getItem('canopy-reloaded');
+    localStorage.setItem('canopy-etag', tag);
+    if (stored && stored !== tag && !justReloaded){
+      sessionStorage.setItem('canopy-reloaded', '1');
+      toast('\u2b06 Updating to the latest version\u2026');
+      setTimeout(()=> location.replace(location.pathname + '?fresh=' + Date.now()), 900);
+    } else if (justReloaded){
+      sessionStorage.removeItem('canopy-reloaded');
+    }
+  }catch(e){ /* offline or blocked: just run what we have */ }
+})();
 
 // ================= Boot =================
 initUsername();
