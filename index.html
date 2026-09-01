@@ -162,6 +162,26 @@
     pointer-events:none;white-space:nowrap;
   }
   .toast.show{opacity:1;}
+  .notable-panel{
+    position:absolute;bottom:92px;left:12px;z-index:900;
+    background:var(--paper);border:1px solid #D5DCCB;border-radius:10px;
+    padding:8px 12px;font-size:12px;box-shadow:0 2px 8px rgba(0,0,0,.12);min-width:150px;
+  }
+  .notable-panel label{display:flex;align-items:center;gap:6px;cursor:pointer;font-weight:600;}
+  .notable-panel input{accent-color:var(--canopy);}
+  .notable-panel .np-bar{height:5px;background:#E3E8DA;border-radius:999px;margin-top:6px;overflow:hidden;}
+  .notable-panel .np-bar i{display:block;height:100%;background:#EF9F27;width:0;}
+  .notable-panel .np-count{font-size:11px;color:#6a745f;margin-top:4px;}
+  .nbadge{display:inline-block;font-size:11px;font-weight:700;padding:3px 9px;border-radius:999px;background:#FAEEDA;color:#633806;margin-bottom:6px;}
+  .story{background:var(--bud);border-radius:10px;padding:10px 12px;font-size:13.5px;line-height:1.5;margin-bottom:12px;}
+  .story .src{font-size:11px;color:#78826d;margin-top:6px;}
+  .challenge{border:2px solid #EF9F27;border-radius:12px;padding:10px 12px;margin-bottom:14px;}
+  .challenge .row{display:flex;justify-content:space-between;align-items:baseline;font-size:13px;}
+  .challenge .segs{display:flex;gap:4px;margin-top:8px;}
+  .challenge .segs span{flex:1;height:8px;border-radius:2px;background:#EEF1E9;}
+  .challenge .segs span.on{background:#EF9F27;}
+  .challenge .segs span.here{outline:1.5px solid #EF9F27;outline-offset:-1.5px;}
+  .challenge .hint{font-size:12px;color:#6a745f;margin-top:8px;line-height:1.4;}
   .lb-btn{
     margin-left:auto;width:36px;height:36px;border-radius:50%;flex:none;
     background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.25);
@@ -246,14 +266,22 @@
   <div><span class="dot need"></span> <span id="legendNeed">Needs a photo</span></div>
   <div><span class="dot done"></span> <span id="legendDone">Photographed</span></div>
 </div>
+<div class="notable-panel" id="notablePanel">
+  <label><input type="checkbox" id="notableToggle" checked> ⭐ Notable trees</label>
+  <div class="np-bar"><i id="npFill"></i></div>
+  <div class="np-count" id="npCount">0 of 10 visited</div>
+</div>
 <div class="datastamp">City of Cambridge data · Aug 21, 2026</div>
 <button class="locate-btn" id="locateBtn" title="Find my location" aria-label="Find my location">📍</button>
 
 <div class="sheet-backdrop" id="backdrop">
   <div class="sheet" role="dialog" aria-label="Tree details">
+    <div class="nbadge" id="notableBadge" style="display:none"></div>
     <h2 id="treeName">Tree</h2>
     <div class="sci" id="treeSci"></div>
     <div class="meta" id="treeMeta"></div>
+    <div class="story" id="storyCard" style="display:none"></div>
+    <div class="challenge" id="challengeCard" style="display:none"></div>
     <input type="text" id="userName" maxlength="40" placeholder="Your name (required to add photos or notes)">
     <div class="gallery" id="gallery"></div>
     <div class="c-head">Stories &amp; notes</div>
@@ -425,16 +453,16 @@ async function loadPhotoIndex(){
   const pill = $('storagePill');
   if (storageOk){
     pill.className = 'sbar ok';
-    pill.textContent = '\u2713 Shared photos: connected \u00b7 app v10 \u00b7 tap to test';
+    pill.textContent = '\u2713 Shared photos: connected \u00b7 app v11 \u00b7 tap to test';
   } else {
     pill.className = 'sbar bad';
-    pill.textContent = '\u26a0 Photos NOT saving \u00b7 app v10 \u00b7 tap for details';
+    pill.textContent = '\u26a0 Photos NOT saving \u00b7 app v11 \u00b7 tap for details';
   }
 }
 
 // Tap the pill any time to run a live connection test and see the raw result
 $('storagePill').addEventListener('click', async ()=>{
-  let report = 'CANOPY DIAGNOSTIC\\n\\nApp version: v10 (leaderboard)\\nDatabase: ' + SB_URL + '\\n\\n';
+  let report = 'CANOPY DIAGNOSTIC\\n\\nApp version: v11 (notable trees)\\nDatabase: ' + SB_URL + '\\n\\n';
   try{
     const res = await fetch(SB_URL + '/rest/v1/photos?select=tree_id&limit=1', { headers: SB_HEADERS });
     const body = (await res.text()).slice(0, 300);
@@ -615,8 +643,23 @@ $('commentBtn').addEventListener('click', async ()=>{
 // ================= Tree sheet =================
 async function openTree(t){
   currentTree = t; pendingPhoto = null;
-  $('treeName').textContent = t.common;
-  $('treeSci').textContent = t.sci;
+  const nb = notableById[t.id];
+  if (nb){
+    $('notableBadge').style.display = 'inline-block';
+    $('notableBadge').textContent = '\u2b50 Notable tree \u00b7 ' + nb.n + ' of ' + NOTABLE.length;
+    $('treeName').textContent = nb.name;
+    $('treeSci').textContent = t.common + ' \u00b7 ' + nb.where;
+    $('storyCard').style.display = 'block';
+    $('storyCard').innerHTML = esc(nb.story) + '<div class="src">Source: ' + esc(nb.src) + '</div>';
+    $('challengeCard').style.display = 'block';
+    renderChallenge(t);
+  } else {
+    $('notableBadge').style.display = 'none';
+    $('storyCard').style.display = 'none';
+    $('challengeCard').style.display = 'none';
+    $('treeName').textContent = t.common;
+    $('treeSci').textContent = t.sci;
+  }
   $('treeMeta').textContent =
     (t.dbh && t.dbh !== '0' ? 'Trunk diameter: ' + t.dbh + '″ · ' : '') +
     t.lat.toFixed(5) + ', ' + t.lng.toFixed(5) + ' · City of Cambridge inventory';
@@ -713,6 +756,8 @@ $('saveBtn').addEventListener('click', async ()=>{
   const ok = await addPhoto(currentTree.id, pendingPhoto);
   $('saveBtn').textContent = 'Add my photo';
   if (ok){
+    myVisited.add(currentTree.id);
+    refreshNotables();
     applySeasonFilter();
     $('backdrop').classList.remove('open');
     toast(storageOk
@@ -730,6 +775,164 @@ $('saveBtn').addEventListener('click', async ()=>{
 $('closeBtn').addEventListener('click', ()=> $('backdrop').classList.remove('open'));
 $('saveModalDone').addEventListener('click', ()=> $('saveModal').classList.remove('open'));
 $('backdrop').addEventListener('click', e => { if (e.target === $('backdrop')) $('backdrop').classList.remove('open'); });
+
+// ================= Notable trees + challenge =================
+const NOTABLE = [
+ {
+  "id": "ct-48709",
+  "n": 1,
+  "name": "Danny Lewin's apple tree",
+  "where": "Danny Lewin Park, Kendall Square",
+  "story": "Kendall Square honors its inventors with buildings and plaques. This one gets a tree. The city's record for this modest apple says only \"Daniel M. Lewin memorial.\" Danny Lewin was an MIT student who co-founded Akamai in 1998, building technology that still carries much of the internet's traffic. He was aboard American Airlines Flight 11 on September 11, 2001. The park was named for him; the tree grows in it quietly. Look for blossom in early May.",
+  "src": "City of Cambridge inventory"
+ },
+ {
+  "id": "ct-17036",
+  "n": 2,
+  "name": "The Old Burying Ground giants",
+  "where": "1,456 Massachusetts Ave, Harvard Square",
+  "story": "The Old Burying Ground opened in 1635, a year before Harvard. Its headstones lean, its inscriptions have softened, and this red oak has spent well over a century pushing its roots among them. At 47 inches across, it's the largest tree in Harvard Square and one of the biggest in the whole app. Its neighbor, a tuliptree, blooms with green-and-orange tulip-shaped flowers in June that almost nobody notices because they're forty feet up. Bring binoculars.",
+  "src": "City of Cambridge inventory"
+ },
+ {
+  "id": "ct-M1540432",
+  "n": 3,
+  "name": "The champion pin oak",
+  "where": "MIT west campus, near Memorial Drive",
+  "story": "This is the largest tree on the map: 53 inches through the trunk, a size pin oaks reach only after roughly a century of good luck. Pin oaks are the city's workhorse street tree — there are more than 1,600 of them in this app alone — but almost all are young. This one shows what the rest are aiming for. Its runner-up, a 49-inch pin oak, grows in an ordinary sidewalk pit at 29 Kinnaird St in Cambridgeport, which may be the more impressive feat.",
+  "src": "City of Cambridge inventory (MIT-maintained tree)"
+ },
+ {
+  "id": "ct-5617",
+  "n": 4,
+  "name": "The Dunster Street sycamores",
+  "where": "95 Dunster St at Memorial Drive",
+  "story": "Three American sycamores stand in a row where Dunster Street meets the river, each one over 40 inches thick. You'll know them by their bark, which peels in patches of white, cream, and olive like military camouflage. Sycamores are river trees by nature, and these were planted along Memorial Drive by the state, not the city — they're looked after by the Department of Conservation and Recreation. Photograph all three; the challenge only needs one.",
+  "src": "City of Cambridge inventory (DCR-maintained trees)"
+ },
+ {
+  "id": "ct-149810",
+  "n": 5,
+  "name": "The Dana Park dawn redwood",
+  "where": "Dana Park, by the playground",
+  "story": "Until 1944 this species was known only from fossils, a tree that had supposedly been extinct for millions of years. Then a Chinese forester found living ones in a remote valley, and seeds went out to gardens around the world. This is one of their descendants. Dawn redwoods break the rules: they're conifers, but they drop their needles every fall after turning the color of a copper penny. Ours is still young. Come back in November.",
+  "src": "City of Cambridge arborist notes"
+ },
+ {
+  "id": "ct-1506577",
+  "n": 6,
+  "name": "The mystery memorial maple",
+  "where": "94 Pearl St, Cambridgeport",
+  "story": "In June 2023 a city arborist noticed a maple on Pearl Street that wasn't in any record. Someone had planted it, and someone had laid a marble memorial plaque inside the tree well. The city added it to the inventory with one word: \"mystery.\" Nobody at the city knows who planted it or whom it remembers. Somebody on Pearl Street does. If that's you, or you've heard the story, the notes below are the place to tell it.",
+  "src": "City of Cambridge arborist notes"
+ },
+ {
+  "id": "ct-1504312",
+  "n": 7,
+  "name": "The historian's yellowwood",
+  "where": "49 Brattle St, Harvard Square",
+  "story": "This young yellowwood was planted in memory of Priscilla Johnson McMillan, a Cambridge journalist and historian with one of the strangest résumés in American letters: she had worked for John F. Kennedy as a young researcher, and later, as a reporter in Moscow, interviewed a defector named Lee Harvey Oswald. Her book \"Marina and Lee\" came from that. A yellowwood is a fitting memorial — slow to flower, but when it does, in late spring, it hangs with white blossom that smells like honey.",
+  "src": "City of Cambridge arborist notes"
+ },
+ {
+  "id": "ct-6727",
+  "n": 8,
+  "name": "The elm survivor",
+  "where": "33 Granite St, Cambridgeport",
+  "story": "American elms once arched over almost every street in New England. Dutch elm disease, a fungus carried by beetles, arrived in the 1930s and killed the great majority of them within a few decades. Big old elms that remain are survivors — resistant, lucky, or both. This one, at 41 inches, is the largest in the app; the arborist's note says its roots are \"growing out of the street,\" which is what a century of stubbornness looks like. A few blocks away at 155 Brookline St is its successor: a Princeton elm, a cultivar bred to resist the disease.",
+  "src": "City of Cambridge arborist notes"
+ },
+ {
+  "id": "ct-1509848",
+  "n": 9,
+  "name": "The peach tree",
+  "where": "12 Watson St, Cambridgeport",
+  "story": "Most of the city's street trees are chosen for toughness: honeylocust, pin oak, zelkova, trees that shrug off salt and drought and dogs. This one is a peach. The inventory says simply \"peach tree,\" and offers no explanation for how a fruit tree came to be a municipal street tree on Watson Street. Peaches flower pink in April, before the leaves. Whether it sets fruit, and who eats it, is a question for the neighbors. Come visit it if you like a good peach.",
+  "src": "City of Cambridge arborist notes"
+ },
+ {
+  "id": "ct-1512243",
+  "n": 10,
+  "name": "The volunteer elm",
+  "where": "34 Lopez St, Cambridgeport",
+  "story": "Nobody planted this tree. An elm seed landed in a fence line on Lopez Street, sprouted, and grew — through the fence, then over it — until it was too big to pretend it wasn't there. The city's note reads \"volunteer tree growing in fence.\" Rather than remove it, the arborists gave it an inventory number and a place on the map. It is the only tree in this app that invited itself, which makes it a fair mascot for a map built by volunteers.",
+  "src": "City of Cambridge arborist notes"
+ }
+];
+const notableById = {}; NOTABLE.forEach(n => notableById[n.id] = n);
+const notableLayer = L.layerGroup().addTo(map);
+const notableMarkers = {};
+let myVisited = new Set();
+
+function starIcon(visited){
+  const fill = visited ? '#2F6B3C' : '#EF9F27';
+  return L.divIcon({ className:'', iconSize:[26,26], iconAnchor:[13,13],
+    html:'<svg viewBox="0 0 24 24" width="26" height="26" style="filter:drop-shadow(0 1px 2px rgba(0,0,0,.4))"><path d="M12 2l3 6.6 7.2.8-5.4 5 1.5 7.1L12 18l-6.3 3.5 1.5-7.1-5.4-5 7.2-.8z" fill="'+fill+'" stroke="#FBFAF6" stroke-width="1.4"/></svg>' });
+}
+function drawNotables(){
+  for (const n of NOTABLE){
+    const t = trees[n.id]; if (!t) continue;
+    const m = L.marker([t.lat, t.lng], { icon: starIcon(false), zIndexOffset: 1000 });
+    m.bindTooltip(n.n + ' · ' + n.name, { direction:'top', offset:[0,-10] });
+    m.on('click', ()=> openTree(t));
+    m.addTo(notableLayer);
+    notableMarkers[n.id] = m;
+  }
+}
+function refreshNotables(){
+  let done = 0;
+  for (const n of NOTABLE){
+    const v = myVisited.has(n.id);
+    if (v) done++;
+    if (notableMarkers[n.id]) notableMarkers[n.id].setIcon(starIcon(v));
+  }
+  $('npFill').style.width = (100*done/NOTABLE.length) + '%';
+  $('npCount').textContent = currentUsername()
+    ? done + ' of ' + NOTABLE.length + ' visited'
+    : 'Enter your name to track visits';
+  if (currentTree && notableById[currentTree.id]) renderChallenge(currentTree);
+}
+async function loadMyVisited(){
+  myVisited = new Set();
+  const me = currentUsername();
+  if (me && storageOk){
+    try{
+      const rows = await fetchAll('photos?username=eq.' + encodeURIComponent(me) + '&select=tree_id');
+      rows.forEach(r => myVisited.add(r.tree_id));
+    }catch(e){}
+  }
+  refreshNotables();
+}
+function distMiles(a, b){
+  const R = 3958.8, toR = x => x*Math.PI/180;
+  const dLat = toR(b.lat-a.lat), dLng = toR(b.lng-a.lng);
+  const s = Math.sin(dLat/2)**2 + Math.cos(toR(a.lat))*Math.cos(toR(b.lat))*Math.sin(dLng/2)**2;
+  return 2*R*Math.asin(Math.sqrt(s));
+}
+function renderChallenge(t){
+  const n = notableById[t.id];
+  const done = NOTABLE.filter(x => myVisited.has(x.id)).length;
+  const here = myVisited.has(t.id);
+  const segs = NOTABLE.map(x => '<span class="' + (myVisited.has(x.id) ? 'on' : '') + (x.id===t.id ? ' here' : '') + '"></span>').join('');
+  let hint;
+  if (!currentUsername()) hint = 'Enter your name above to track your visits.';
+  else if (done === NOTABLE.length) hint = '🏆 All ten visited — you have completed the challenge!';
+  else {
+    const origin = userMarker ? userMarker.getLatLng() : { lat: t.lat, lng: t.lng };
+    const next = NOTABLE.filter(x => !myVisited.has(x.id) && x.id !== t.id && trees[x.id])
+      .map(x => ({ x, d: distMiles(origin, trees[x.id]) })).sort((a,b) => a.d-b.d)[0];
+    hint = (here ? '✓ You have visited this tree. ' : 'Photograph this tree to mark it visited. ') +
+      (next ? 'Next nearest: ' + esc(next.x.name) + ', ' + esc(next.x.where.split(',')[0]) + ' (' + next.d.toFixed(1) + ' mi)' : '');
+  }
+  $('challengeCard').innerHTML =
+    '<div class="row"><b>Ten notable trees</b><span style="color:#6a745f">' + done + ' of ' + NOTABLE.length + '</span></div>' +
+    '<div class="segs">' + segs + '</div><div class="hint">' + hint + '</div>';
+}
+$('notableToggle').addEventListener('change', e => {
+  if (e.target.checked) map.addLayer(notableLayer); else map.removeLayer(notableLayer);
+});
+let _visitTimer = null;
+$('userName').addEventListener('input', ()=>{ clearTimeout(_visitTimer); _visitTimer = setTimeout(loadMyVisited, 900); });
 
 // ================= Contributors / leaderboard =================
 let lbData = null, lbWin = 'all';
@@ -822,7 +1025,9 @@ function renderLeaderboard(){
     '<div class="lb-sub">' + mine.length + ' photo' + (mine.length===1?'':'s') + ' · ' + myTrees + ' tree' + (myTrees===1?'':'s') +
     ' · ' + myStories + ' stor' + (myStories===1?'y':'ies') + ' all time</div>' +
     '<div class="lb-pills">' + ['spring','summer','fall','winter'].map(s =>
-      '<span class="lb-pill ' + (bySeason[s] ? s : 'zero') + '">' + seasonLabel(s) + ' ' + bySeason[s] + '</span>').join('') + '</div>';
+      '<span class="lb-pill ' + (bySeason[s] ? s : 'zero') + '">' + seasonLabel(s) + ' ' + bySeason[s] + '</span>').join('') + '</div>' +
+    '<div class="lb-sub" style="margin-top:8px">\u2b50 Ten notable trees: ' + NOTABLE.filter(x => myVisited.has(x.id)).length + ' of ' + NOTABLE.length +
+    (NOTABLE.every(x => myVisited.has(x.id)) ? ' \u2014 complete! \ud83c\udfc6' : '') + '</div>';
 }
 
 $('lbBtn').addEventListener('click', openLeaderboard);
@@ -862,7 +1067,8 @@ addPhoto = async function(id, img){ const ok = await _origAddPhoto(id, img); if 
 // ================= Boot =================
 initUsername();
 loadTrees();
-loadPhotoIndex().then(applySeasonFilter);
+drawNotables();
+loadPhotoIndex().then(()=>{ applySeasonFilter(); loadMyVisited(); });
 </script>
 </body>
 </html>
